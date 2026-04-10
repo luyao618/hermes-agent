@@ -99,6 +99,12 @@ FAKE_WEBP = b"RIFF\x00\x00\x00\x00WEBP" + b"\x00" * 32
 FAKE_OGG = b"OggS" + b"\x00" * 32
 FAKE_MP3_ID3 = b"ID3" + b"\x00" * 32
 FAKE_MP3_SYNC = bytes([0xFF, 0xFB, 0x90, 0x00]) + b"\x00" * 32
+FAKE_WAV = b"RIFF\x00\x00\x00\x00WAVE" + b"\x00" * 32
+FAKE_WEBM = b"\x1a\x45\xdf\xa3" + b"\x00" * 32
+FAKE_M4A = b"\x00\x00\x00\x20ftyp" + b"M4A " + b"\x00" * 24
+FAKE_FLAC = b"fLaC" + b"\x00" * 32
+# A RIFF container that is neither WEBP nor WAVE (e.g. AVI).
+FAKE_RIFF_AVI = b"RIFF\x00\x00\x00\x00AVI " + b"\x00" * 32
 
 # A typical HTML sign-in page payload that Slack returns on auth failure.
 HTML_SIGN_IN = (
@@ -173,6 +179,38 @@ class TestLooksLikeMedia:
     def test_ogg_not_recognised_as_image(self):
         """OGG magic bytes should not pass image validation."""
         assert SlackAdapter._looks_like_media(FAKE_OGG, audio=False) is False
+
+    # -- New formats: WAV, WebM, M4A, FLAC --
+
+    def test_wav_recognised_as_audio(self):
+        assert SlackAdapter._looks_like_media(FAKE_WAV, audio=True) is True
+
+    def test_webm_recognised_as_audio(self):
+        assert SlackAdapter._looks_like_media(FAKE_WEBM, audio=True) is True
+
+    def test_m4a_recognised_as_audio(self):
+        assert SlackAdapter._looks_like_media(FAKE_M4A, audio=True) is True
+
+    def test_flac_recognised_as_audio(self):
+        assert SlackAdapter._looks_like_media(FAKE_FLAC, audio=True) is True
+
+    # -- RIFF sub-type gating --
+
+    def test_riff_avi_rejected_as_image(self):
+        """An AVI RIFF container should NOT pass image validation."""
+        assert SlackAdapter._looks_like_media(FAKE_RIFF_AVI, audio=False) is False
+
+    def test_riff_avi_rejected_as_audio(self):
+        """An AVI RIFF container should NOT pass audio validation."""
+        assert SlackAdapter._looks_like_media(FAKE_RIFF_AVI, audio=True) is False
+
+    def test_webp_not_recognised_as_audio(self):
+        """A WEBP RIFF container should NOT pass audio validation."""
+        assert SlackAdapter._looks_like_media(FAKE_WEBP, audio=True) is False
+
+    def test_wav_not_recognised_as_image(self):
+        """A WAV RIFF container should NOT pass image validation."""
+        assert SlackAdapter._looks_like_media(FAKE_WAV, audio=False) is False
 
 
 # ---------------------------------------------------------------------------

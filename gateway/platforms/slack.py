@@ -1580,18 +1580,20 @@ class SlackAdapter(BasePlatformAdapter):
             return False
 
     # Magic-byte signatures used to verify downloaded media is genuine.
+    # Each entry is (magic_bytes, offset).  For RIFF-based formats the
+    # check requires 12 bytes so the container sub-type (WEBP / WAVE) is
+    # verified — a bare "RIFF" prefix is NOT enough.
     _IMAGE_SIGNATURES: list[tuple[bytes, int]] = [
         (b"\x89PNG", 0),    # PNG
         (b"\xff\xd8", 0),   # JPEG
         (b"GIF8", 0),       # GIF87a / GIF89a
-        (b"RIFF", 0),       # WEBP (RIFF....WEBP) – first 4 bytes
         (b"BM", 0),         # BMP
     ]
     _AUDIO_SIGNATURES: list[tuple[bytes, int]] = [
-        (b"OggS", 0),       # OGG / Opus
-        (b"ID3", 0),        # MP3 with ID3v2 tag
-        (b"fLaC", 0),       # FLAC
-        (b"RIFF", 0),       # WAV (RIFF....WAVE)
+        (b"OggS", 0),           # OGG / Opus
+        (b"ID3", 0),            # MP3 with ID3v2 tag
+        (b"fLaC", 0),           # FLAC
+        (b"\x1a\x45\xdf\xa3", 0),  # WebM / Matroska (EBML header)
     ]
 
     @staticmethod
@@ -1600,8 +1602,12 @@ class SlackAdapter(BasePlatformAdapter):
         signature.  When *audio* is ``True`` the check uses audio signatures;
         otherwise it uses image signatures.
 
-        An MP3 frame sync (``0xFF 0xE0+``) is also accepted for audio because
-        many MP3 files lack an ID3 header.
+        Additional heuristics:
+        * RIFF containers are matched with their sub-type (``WEBP`` for images,
+          ``WAVE`` for audio) to avoid accepting arbitrary RIFF files.
+        * MP4/M4A (``ftyp`` at offset 4) is accepted for audio.
+        * An MP3 frame sync (``0xFF 0xE0+``) is accepted for audio because
+          many MP3 files lack an ID3 header.
         """
         if len(data) < 4:
             return False
@@ -1609,8 +1615,15 @@ class SlackAdapter(BasePlatformAdapter):
         for magic, offset in sigs:
             if data[offset:offset + len(magic)] == magic:
                 return True
-        # WEBP: RIFF____WEBP  (already matched RIFF above, but refine)
-        if not audio and len(data) >= 12 and data[8:12] == b"WEBP":
+        # RIFF containers: require 12 bytes and verify the sub-type
+        if len(data) >= 12 and data[:4] == b"RIFF":
+            subtype = data[8:12]
+            if not audio and subtype == b"WEBP":
+                return True
+            if audio and subtype == b"WAVE":
+                return True
+        # MP4 / M4A: "ftyp" at offset 4
+        if audio and len(data) >= 8 and data[4:8] == b"ftyp":
             return True
         # MP3 frame sync without ID3 header
         if audio and len(data) >= 2 and data[0] == 0xFF and (data[1] & 0xE0) == 0xE0:
