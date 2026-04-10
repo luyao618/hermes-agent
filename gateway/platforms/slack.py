@@ -1579,8 +1579,62 @@ class SlackAdapter(BasePlatformAdapter):
         except Exception:
             return False
 
+    # Magic-byte signatures used to verify downloaded media is genuine.
+    _IMAGE_SIGNATURES: list[tuple[bytes, int]] = [
+        (b"\x89PNG", 0),    # PNG
+        (b"\xff\xd8", 0),   # JPEG
+        (b"GIF8", 0),       # GIF87a / GIF89a
+        (b"RIFF", 0),       # WEBP (RIFF....WEBP) – first 4 bytes
+        (b"BM", 0),         # BMP
+    ]
+    _AUDIO_SIGNATURES: list[tuple[bytes, int]] = [
+        (b"OggS", 0),       # OGG / Opus
+        (b"ID3", 0),        # MP3 with ID3v2 tag
+        (b"fLaC", 0),       # FLAC
+        (b"RIFF", 0),       # WAV (RIFF....WAVE)
+    ]
+
+    @staticmethod
+    def _looks_like_media(data: bytes, *, audio: bool = False) -> bool:
+        """Return *True* if *data* starts with a recognised media magic-byte
+        signature.  When *audio* is ``True`` the check uses audio signatures;
+        otherwise it uses image signatures.
+
+        An MP3 frame sync (``0xFF 0xE0+``) is also accepted for audio because
+        many MP3 files lack an ID3 header.
+        """
+        if len(data) < 4:
+            return False
+        sigs = SlackAdapter._AUDIO_SIGNATURES if audio else SlackAdapter._IMAGE_SIGNATURES
+        for magic, offset in sigs:
+            if data[offset:offset + len(magic)] == magic:
+                return True
+        # WEBP: RIFF____WEBP  (already matched RIFF above, but refine)
+        if not audio and len(data) >= 12 and data[8:12] == b"WEBP":
+            return True
+        # MP3 frame sync without ID3 header
+        if audio and len(data) >= 2 and data[0] == 0xFF and (data[1] & 0xE0) == 0xE0:
+            return True
+        return False
+
+    @staticmethod
+    def _content_type_is_html(response_headers) -> bool:
+        """Return *True* when the response Content-Type indicates HTML."""
+        ct = str(response_headers.get("content-type", "")).lower()
+        return "text/html" in ct or "text/xml" in ct
+
     async def _download_slack_file(self, url: str, ext: str, audio: bool = False, team_id: str = "") -> str:
-        """Download a Slack file using the bot token for auth, with retry."""
+        """Download a Slack file using the bot token for auth, with retry.
+
+        After a successful HTTP response the payload is validated:
+        * The ``Content-Type`` header must **not** indicate HTML (a common
+          symptom of Slack returning a sign-in redirect).
+        * The first bytes of the body must match a known image/audio magic-byte
+          signature.
+
+        If validation fails a ``ValueError`` is raised so that the caller's
+        ``except`` block can log a clear warning instead of caching garbage.
+        """
         import asyncio
         import httpx
 
@@ -1595,6 +1649,22 @@ class SlackAdapter(BasePlatformAdapter):
                         headers={"Authorization": f"Bearer {bot_token}"},
                     )
                     response.raise_for_status()
+
+                    # --- Validate the payload before caching ----------------
+                    if self._content_type_is_html(response.headers):
+                        raise ValueError(
+                            f"Expected media but received HTML response "
+                            f"(Content-Type: {response.headers.get('content-type', 'unknown')}); "
+                            f"Slack may require re-authentication"
+                        )
+
+                    if not self._looks_like_media(response.content, audio=audio):
+                        raise ValueError(
+                            f"Downloaded content does not match any known "
+                            f"{'audio' if audio else 'image'} signature "
+                            f"(first bytes: {response.content[:16]!r}); refusing to cache"
+                        )
+                    # -------------------------------------------------------
 
                     if audio:
                         from gateway.platforms.base import cache_audio_from_bytes

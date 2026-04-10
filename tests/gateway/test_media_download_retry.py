@@ -395,7 +395,8 @@ class TestSlackDownloadSlackFile:
         adapter = _make_slack_adapter()
 
         fake_response = MagicMock()
-        fake_response.content = b"fake image bytes"
+        fake_response.content = b"\xff\xd8\xff\xe0" + b"\x00" * 32  # valid JPEG magic
+        fake_response.headers = {"content-type": "image/jpeg"}
         fake_response.raise_for_status = MagicMock()
 
         mock_client = AsyncMock()
@@ -419,7 +420,8 @@ class TestSlackDownloadSlackFile:
         adapter = _make_slack_adapter()
 
         fake_response = MagicMock()
-        fake_response.content = b"image bytes"
+        fake_response.content = b"\xff\xd8\xff\xe0" + b"\x00" * 32  # valid JPEG magic
+        fake_response.headers = {"content-type": "image/jpeg"}
         fake_response.raise_for_status = MagicMock()
 
         mock_client = AsyncMock()
