@@ -377,13 +377,20 @@ def _run_post_setup(post_setup_key: str):
     import shutil
     if post_setup_key in ("agent_browser", "browserbase"):
         node_modules = PROJECT_ROOT / "node_modules" / "agent-browser"
-        if not node_modules.exists() and shutil.which("npm"):
+        npm_bin = shutil.which("npm")
+        if not node_modules.exists() and npm_bin:
             _print_info("    Installing Node.js dependencies for browser tools...")
             import subprocess
-            result = subprocess.run(
-                ["npm", "install", "--silent"],
-                capture_output=True, text=True, cwd=str(PROJECT_ROOT)
-            )
+            # Use the resolved path so Windows finds npm.cmd correctly;
+            # bare "npm" fails because CreateProcess does not search PATHEXT.
+            try:
+                result = subprocess.run(
+                    [npm_bin, "install", "--silent"],
+                    capture_output=True, text=True, cwd=str(PROJECT_ROOT),
+                )
+            except FileNotFoundError:
+                _print_warning("    npm could not be launched - run manually: npm install (in hermes-agent directory)")
+                return
             if result.returncode == 0:
                 _print_success("    Node.js dependencies installed")
             else:
@@ -394,17 +401,22 @@ def _run_post_setup(post_setup_key: str):
 
     elif post_setup_key == "camofox":
         camofox_dir = PROJECT_ROOT / "node_modules" / "@askjo" / "camoufox-browser"
-        if not camofox_dir.exists() and shutil.which("npm"):
+        npm_bin = shutil.which("npm")
+        if not camofox_dir.exists() and npm_bin:
             _print_info("    Installing Camofox browser server...")
             import subprocess
-            result = subprocess.run(
-                ["npm", "install", "--silent"],
-                capture_output=True, text=True, cwd=str(PROJECT_ROOT)
-            )
+            try:
+                result = subprocess.run(
+                    [npm_bin, "install", "--silent"],
+                    capture_output=True, text=True, cwd=str(PROJECT_ROOT),
+                )
+            except FileNotFoundError:
+                _print_warning("    npm could not be launched - run manually: npm install (in hermes-agent directory)")
+                return
             if result.returncode == 0:
                 _print_success("    Camofox installed")
             else:
-                _print_warning("    npm install failed - run manually: npm install")
+                _print_warning("    npm install failed - run manually: npm install (in hermes-agent directory)")
         if camofox_dir.exists():
             _print_info("    Start the Camofox server:")
             _print_info("      npx @askjo/camoufox-browser")
