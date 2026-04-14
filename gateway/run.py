@@ -5378,8 +5378,10 @@ class GatewayRunner:
                     task_id=task_id,
                 )
 
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, run_sync)
+            # Use asyncio.to_thread instead of run_in_executor to
+            # propagate contextvars (session context) into the worker
+            # thread.  Fixes #9354.
+            result = await asyncio.to_thread(run_sync)
 
             response = result.get("final_response", "") if result else ""
             if not response and result and result.get("error"):
@@ -5561,8 +5563,8 @@ class GatewayRunner:
                     task_id=task_id,
                 )
 
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, run_sync)
+            # Use asyncio.to_thread to propagate contextvars.  Fixes #9354.
+            result = await asyncio.to_thread(run_sync)
 
             response = (result.get("final_response") or "") if result else ""
             if not response and result and result.get("error"):
@@ -8361,9 +8363,10 @@ class GatewayRunner:
             _agent_warning_raw = float(os.getenv("HERMES_AGENT_TIMEOUT_WARNING", 900))
             _agent_warning = _agent_warning_raw if _agent_warning_raw > 0 else None
             _warning_fired = False
-            loop = asyncio.get_event_loop()
+            # Use asyncio.to_thread to propagate contextvars (session
+            # context) into the worker thread.  Fixes #9354.
             _executor_task = asyncio.ensure_future(
-                loop.run_in_executor(None, run_sync)
+                asyncio.to_thread(run_sync)
             )
 
             _inactivity_timeout = False
