@@ -25,6 +25,14 @@ except Exception:  # pragma: no cover - handled at runtime
     yaml = None
 
 
+def _same_file(src: 'Path', dst: 'Path') -> bool:
+    """Return True if *src* and *dst* resolve to the same filesystem entity."""
+    try:
+        return src.resolve() == dst.resolve() or os.path.samefile(src, dst)
+    except (OSError, ValueError):
+        return False
+
+
 ENTRY_DELIMITER = "\n§\n"
 DEFAULT_MEMORY_CHAR_LIMIT = 2200
 DEFAULT_USER_CHAR_LIMIT = 1375
@@ -388,6 +396,8 @@ def backup_existing(path: Path, backup_root: Path) -> Optional[Path]:
     rel = Path(*path.parts[1:]) if path.is_absolute() and len(path.parts) > 1 else path
     dest = backup_root / rel
     ensure_parent(dest)
+    if _same_file(path, dest):
+        return None
     if path.is_dir():
         shutil.copytree(path, dest, dirs_exist_ok=True)
     else:
@@ -1108,6 +1118,10 @@ class Migrator:
     def copy_file(self, source: Path, destination: Path, kind: str,
                   transform: Optional[Any] = None) -> None:
         if not source or not source.exists():
+            return
+
+        if _same_file(source, destination):
+            self.record(kind, source, destination, "skipped", "Source and destination are the same file")
             return
 
         if destination.exists():
@@ -2037,6 +2051,9 @@ class Migrator:
             if self.execute:
                 self.maybe_backup(destination)
                 ensure_parent(destination)
+                if _same_file(source, destination):
+                    skipped += 1
+                    continue
                 shutil.copy2(source, destination)
             copied += 1
 
@@ -2091,6 +2108,9 @@ class Migrator:
         destination = self.archive_dir / relative_label(source, self.source_root) if self.archive_dir else None
         if self.execute and destination is not None:
             ensure_parent(destination)
+            if _same_file(source, destination):
+                self.record("archive", source, destination, "skipped", "Source and destination are the same file")
+                return
             if source.is_dir():
                 shutil.copytree(source, destination, dirs_exist_ok=True)
             else:
