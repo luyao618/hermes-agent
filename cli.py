@@ -11200,10 +11200,26 @@ class HermesCLI:
         then prints a short status line so the user sees activity instead of
         a frozen screen while a large payload (e.g. 45 KB write_file) streams.
         """
-        if getattr(self, "_stream_box_opened", False):
+        had_open_box = getattr(self, "_stream_box_opened", False)
+        if had_open_box:
             self._flush_stream()
             self._stream_box_opened = False
         self._close_reasoning_box()
+
+        # On Windows Terminal + Git Bash, prompt_toolkit's StdoutProxy queues
+        # _cprint emissions and renders them asynchronously. When the box-close
+        # border from _flush_stream() and the "preparing <tool>…" line below
+        # land in the same render frame, the latter visually displaces the
+        # streamed text — the user sees a tool-progress line where their
+        # response should be. Mirror the turn-end flush pattern (cli.py
+        # ~line 12636) so the renderer paints the streamed text and box
+        # bottom before the tool-progress line is emitted. Fixes #40693.
+        if had_open_box:
+            try:
+                sys.stdout.flush()
+            except Exception:
+                pass
+            time.sleep(0.05)
 
         from agent.display import get_tool_emoji
         emoji = get_tool_emoji(tool_name, default="⚡")
